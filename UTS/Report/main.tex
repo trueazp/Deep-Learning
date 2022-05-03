@@ -8,6 +8,17 @@
 \usepackage{graphicx}
 \usepackage{float}
 \usepackage{adjustbox}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    citecolor=black,
+    pdfpagemode=FullScreen,
+    }
+
+\urlstyle{same}
 \usepackage[justification=centering]{caption}
 
 \hyphenation{op-tical net-works semi-conduc-tor} % Corrects some bad hyphenation
@@ -74,7 +85,7 @@ An Inception block applies four convolution blocks separately on the same featur
 
 One of the focuses of GoogLeNet is to find the best convolution kernel size to avoid overfit problems and minimize the computational costs incurred when increasing the size of the Neural Network to improve performance. The fundamental way to solve both problems is to move from a fully connected architecture to an sparsely connected architecture, even within convolution. The Inception architecture was chosen after setting parameters and successfully demonstrated optimal performance.
 
-According to Fig.1, the inception block consists of 4 parallel paths. The first three paths use convolution layers with sizes 1x1, 3x3, and 5x5 to extract information of different spatial sizes. The two middle lanes perform 1×1 convolution on the input to reduce the number of channels, reducing model complexity. The fourth path uses a maximum 3x3 pooling layer, followed by a 1x1 convolution layer to change the number of channels. The four paths all use appropriate padding to provide input and output of the same height and width. Finally, the outputs along each line are combined along the channel dimensions and comprise block outputs.
+According to Fig.\ref{fig:inception_block}, the inception block consists of 4 parallel paths. The first three paths use convolution layers with sizes 1x1, 3x3, and 5x5 to extract information of different spatial sizes. The two middle lanes perform 1×1 convolution on the input to reduce the number of channels, reducing model complexity. The fourth path uses a maximum 3x3 pooling layer, followed by a 1x1 convolution layer to change the number of channels. The four paths all use appropriate padding to provide input and output of the same height and width. Finally, the outputs along each line are combined along the channel dimensions and comprise block outputs.
 
 \subsection{ResNet}
 The ResNet paper is one of the most cited AI papers, and has been the foundation for neural networks with more than 1,000 layers. It was first introduced in 2015 by Kaiming He, Xiangyu Zhang, Shaoqing Ren and Jian Sun, but Despite its simplicity, the idea of residual connections is highly effective as it supports stable gradient propagation through the network. Instead of modeling $xl+1=F(xl)$, we model $xl+1=xl+F(xl)$ where $F$ is a non-linear mapping (usually a sequence of NN modules likes convolutions, activation functions, and normalizations) \cite{he2016deep}. If we do backpropagation on such residual connections, we obtain:
@@ -92,7 +103,7 @@ The bias towards the identity matrix guarantees a stable gradient propagation be
 
 The original ResNet block applies a non-linear activation function, usually ReLU, after the skip connection. In contrast, the pre-activation ResNet block applies the non-linearity at the beginning of F. Both have their advantages and disadvantages. For very deep network, however, the pre-activation ResNet has shown to perform better as the gradient flow is guaranteed to have the identity matrix as calculated above, and is not harmed by any non-linear activation applied to it. For comparison, in this notebook, we implement both ResNet types as shallow networks.
 
-In Fig.2 we can see that the original ResNet Block implements a non-linear activation function, usually ReLU, after the connection is passed. In contrast, the pre-activated ResNet block implements non-linearity at the beginning of F. Both have their advantages and disadvantages. However, for very deep networks, ResNet pre-activation has shown better performance because the gradient stream is guaranteed to have an identity matrix as calculated above, and is not harmed by the non-linear activation applied to it. For comparison, in this notebook, we implement both types of ResNet as a shallow network.
+In Fig.\ref{fig:resnet_block} we can see that the original ResNet Block implements a non-linear activation function, usually ReLU, after the connection is passed. In contrast, the pre-activated ResNet block implements non-linearity at the beginning of F. Both have their advantages and disadvantages. However, for very deep networks, ResNet pre-activation has shown better performance because the gradient stream is guaranteed to have an identity matrix as calculated above, and is not harmed by the non-linear activation applied to it. For comparison, in this notebook, we implement both types of ResNet as a shallow network.
 
 \subsection{DenseNet}
 DenseNet is another architecture for enabling very deep neural networks and takes a slightly different perspective on residual connections. This architecture developed by Gao Huang, Zhuang Liu, and Laurens van der Marteen, instead of modeling the difference between layers, it considers residual connections as a possible way to reuse features across layers, removing any necessity to learn redundant feature maps. If we go deeper into the network, the model learns abstract features to recognize patterns \cite{huang2017densely}. However, some complex patterns consist of a combination of abstract features (e.g. hand, face, etc.), and low-level features (e.g. edges, basic color, etc.). To find these low-level features in the deep layers, standard CNNs have to learn copy such feature maps, which wastes a lot of parameter complexity. DenseNet provides an efficient way of reusing features by having each convolution depends on all previous input features, but add only a small amount of filters to it. See the figure below for an illustration.
