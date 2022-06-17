@@ -1,0 +1,104 @@
+% written by Akmal Zuhdy Prasetya (H071191035)
+
+\documentclass[peerreview]{IEEEtran}
+\usepackage{cite} % Tidies up citation numbers.
+\usepackage{url} % Provides better formatting of URLs.
+\usepackage[utf8]{inputenc} % Allows Turkish characters.
+\usepackage{booktabs} % Allows the use of \toprule, \midrule and \bottomrule in tables for horizontal lines
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{adjustbox}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    citecolor=black,
+    pdfpagemode=FullScreen,
+    }
+
+\urlstyle{same}
+\usepackage[justification=centering]{caption}
+
+\hyphenation{op-tical net-works semi-conduc-tor} % Corrects some bad hyphenation
+
+\graphicspath{{images/}}
+
+\begin{document}
+%\begin{titlepage}
+% paper title
+% can use linebreaks \\ within to get better formatting as desired
+\title{CycleGAN Model Implementation Report Using Tensorflow - UNHAS Final Test Project}
+
+
+% author names and affiliations
+
+\author{Akmal Zuhdy Prasetya \\
+Information Systems Study Program \\
+Department of Mathematics \\
+Hasanuddin University\\
+}
+\date{6/17/22}
+
+% make the title area
+\maketitle
+\tableofcontents
+\listoffigures
+\listoftables
+%\end{titlepage}
+
+\IEEEpeerreviewmaketitle
+\begin{abstract}
+Image-to-image translation is an important topic in the field of computer vision. It aims to learn the mapping between input image and output image by training the datasets, and finally translates the image style from one domain to another. In terms of the form of translation, it can be divided into the translation between two domains and multiple domains from different datasets. And it is also divided into pairs and unpaired by the training datasets. As a successful representation of the translation of an unpaired image between two domains, the CycleGAN model is of great significance to the research and application. Starting from the application background of the CycleGAN model, this paper attempts to show an implementation of CycleGAN using Tensorflow to try transforming real life image into a painting to better understand how CycleGAN really works.
+
+\end{abstract}
+
+
+% INTRODUCTION
+\section{Introduction}
+
+Since the arrival of Convolutional Neural network (CNN), deep learning as an implementation algorithm of machine learning, has been widely used in Computer Vision field, from the beginning of the recognition of handwritten, object tracking, speech recognition, face recognition, and through training of fruit images dataset, help person determine the type of fruit when given image about it, until Alpha Go, it is the first computer program to defeat a professional human Go player, the first program to defeat a Go world champion, and arguably the strongest Go player in history, making the deep reinforcement learning attracted more and more researcher's attention.
+
+At the same time, the famous model GAN (Generative Adversarial Networks) proposed by Goodfellow in 2014 \cite{goodfellow2014generative}, which is considered to be the coolest idea in the field of machine learning in the past 20 years and bring new breakthroughs to the deep learning model. The key to GAN's success is the idea of an adversarial loss that forces the generated images to be, in principle, indistinguishable from real photos. This loss is particularly powerful for image generation tasks, as this is exactly the objective that many of computer graphics aims to optimize \cite{zhu2019brief}.
+
+
+% PROBLEM DEFINITION
+\section{Problem Definition}
+In this technical report, I focus on reproducing an implementation of CycleGAN model to translate or transform a real life images into a painting like image using Tensorflow.
+
+
+% MODEL EXPLANATION
+\section{CycleGAN Architecture}
+A introduction to the CycleGAN model previously mentioned.
+
+\subsection{Background of CycleGAN}
+Explain here
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\columnwidth]{something}
+    \caption{Some Images}
+    \label{fig:something}
+\end{figure}
+
+According to Fig.\ref{fig:something}, 
+
+
+
+% ANALYSIS / IMPLEMENTATION
+\section{CycleGAN Implementation}
+In general, it can be seen that ..
+
+
+% CONCLUSION
+\section{Conclusions and Recommendations}
+Based on the results obtained, CycleGAN is
+
+% references
+\bibliographystyle{plain} % We choose the "plain" reference style
+\bibliography{refs} % Entries are in the refs.bib file
+
+\end{document}
+
+
