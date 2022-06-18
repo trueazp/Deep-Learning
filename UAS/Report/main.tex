@@ -4,6 +4,7 @@
 \usepackage{cite} % Tidies up citation numbers.
 \usepackage{url} % Provides better formatting of URLs.
 \usepackage[utf8]{inputenc} % Allows Turkish characters.
+\usepackage{amsmath}
 \usepackage{booktabs} % Allows the use of \toprule, \midrule and \bottomrule in tables for horizontal lines
 \usepackage{graphicx}
 \usepackage{float}
@@ -50,7 +51,7 @@ Hasanuddin University\\
 
 \IEEEpeerreviewmaketitle
 \begin{abstract}
-Image-to-image translation is an important topic in the field of computer vision. It aims to learn the mapping between input image and output image by training the datasets, and finally translates the image style from one domain to another. In terms of the form of translation, it can be divided into the translation between two domains and multiple domains from different datasets. And it is also divided into pairs and unpaired by the training datasets. As a successful representation of the translation of an unpaired image between two domains, the CycleGAN model is of great significance to the research and application. Starting from the application background of the CycleGAN model, this paper attempts to show an implementation of CycleGAN using Tensorflow to try transforming real life image into a painting to better understand how CycleGAN really works.
+Image-to-image translation is an important topic in the field of computer vision. It aims to learn the mapping between input image and output image by training the datasets, and finally translates the image style from one domain to another. In terms of the form of translation, it can be divided into the translation between two domains and multiple domains from different datasets. And it is also divided into pairs and unpaired by the training datasets. As a successful representation of the translation of an unpaired image between two domains, the CycleGAN model is of great significance to the research and application. Starting from the application background of the CycleGAN model, this paper attempts to show an implementation of CycleGAN using Tensorflow to try transforming some images into another style so we can better understand how CycleGAN works.
 
 \end{abstract}
 
@@ -65,34 +66,57 @@ At the same time, the famous model GAN (Generative Adversarial Networks) propose
 
 % PROBLEM DEFINITION
 \section{Problem Definition}
-In this technical report, I focus on reproducing an implementation of CycleGAN model to translate or transform a real life images into a painting like image using Tensorflow.
+In this technical report, I focus on reproducing an implementation of CycleGAN model to translate or transform a some images into another style using Tensorflow to better understand how CycleGAN works.
 
 
 % MODEL EXPLANATION
 \section{CycleGAN Architecture}
-A introduction to the CycleGAN model previously mentioned.
+In this section, we first briefly review the principle of CycleGAN and then give a comparison with the Pix2Pix GAN model image-to-image translation models.
 
 \subsection{Background of CycleGAN}
-Explain here
+The task of image style translation is to change a particular aspect of a given image to another, that is to say, given any two unordered image collections X and Y, the algorithm learns to automatically “translate” an image from one into the other and vice versa, which can be divided into two situations which is one is paired translation and the other is unpaired translation \cite{upadhyay2021uncertainty}.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\columnwidth]{something}
-    \caption{Some Images}
-    \label{fig:something}
+    \includegraphics[width=0.8\columnwidth]{GAN Model}
+    \caption{GAN Model}
+    \label{fig:s=gan_model}
 \end{figure}
 
-According to Fig.\ref{fig:something}, 
+For image translation in pairs, the commonly used models is Pix2Pix \cite{isola2017image}, it can verify by example that pix2pix model has a certain universality, but also has certain limitation. First of all, the requirements of the training dataset of training samples must be in pairs, but in real life, if you want to collect a large number of data in pairs, it is a little diﬃculty. If the data quantity is little, and there will be a fitting, model training eﬀect. Secondly, the image transfer achieved by this model is only limited to the transformation of diﬀerent styles of the same image, such as color changes. At this time, how to use samples with diﬀerent styles for training to complete the translation of image style is the basic design idea of CycleGAN model.
 
+\subsection{CycleGAN Model Review}
+As one of the most interesting and important deep learning achievements in 2017, CycleGAN has many application in the past two years. The original schematic and formula of the CycleGAN paper are as follows.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\columnwidth]{CycleGAN Model}
+    \caption{CycleGAN Model}
+    \label{fig:s=cyclegan_model}
+\end{figure}
+
+Jun-Yan Zhun \cite{zhu2017unpaired} given two datasets $\{x_i\}(i=1$ to $M)$ and $\{y\}(j=1$ to $N)$, collected from two different domains $X$ and $Y$, where $x_i \in X$ and $y_j \in Y$, the goal of CycleGAN is to learn a mapping function: $G:X \to Y$, such that the distribution of images from $G(X)$ is distinguishable from the distribution $Y$ using adversarial loss.
+
+CycleGAN contains two mapping functions $G:X \to Y$ and $F:Y \to X$. Two adverasial discriminators $D_X$ and $D_Y$ are proposed to distinguish whether images are translated from another domain. CycleGan applies the GAN framework to train the generative and discriminative models jointly. The overall CycelGAN loss function is expressed as follows: 
+
+\begin{equation}
+    \begin{split}
+         V(G, F, D_X, D_Y) & = V_GAN(D_Y, G, X, Y) \\
+         & + V_GAN(D_X, F, Y, X) \\
+         & + \lambda V_cyc(G, F)
+    \end{split}
+\end{equation}
+
+Where $V_GAN(D_Y, G, X, Y)$ and $V_GAN(D_X, F, Y, X)$ are the loss function for mapping functions $G$ and $F$, and for the discriminators $D_Y$ and $D_X$ is the cycle consistency loss that forces $F(G(x)) \approx x$ and $G(F(y)) \approx y$, in which each image can be reconstructed after a cycle mapping. \lambda penalizes the importance between $V_GAN$ and $V_cyc$.
 
 
 % ANALYSIS / IMPLEMENTATION
 \section{CycleGAN Implementation}
-In general, it can be seen that ..
+In general, it can be seen that ...
 
 
 % CONCLUSION
-\section{Conclusions and Recommendations}
+\section{Results and Conclusions}
 Based on the results obtained, CycleGAN is
 
 % references

@@ -16,25 +16,649 @@ Original file is located at
 Let's start with importing our standard libraries here.
 """
 
-# For the 'InstanceNormalization' layer
-!pip install --upgrade tensorflow_addons
-# For the dataset
-!pip install --upgrade tensorflow_datasets
+!pip install -U scipy==1.2.0
+!pip install -q git+https://github.com/tensorflow/examples.git
 
-# Commented out IPython magic to ensure Python compatibility.
-import time
-
-import matplotlib.pyplot as plt
+import tensorflow.compat.v1 as tf
+import tensorflow_examples
 import numpy as np
-import tensorflow as tf
-from tensorflow.keras.initializers import RandomNormal
-from tensorflow.keras.layers import (Activation, Concatenate, Conv2D, Conv2DTranspose, Input, LeakyReLU)
-from tensorflow.keras.losses import BinaryCrossentropy
-from tensorflow.keras.models import Model, Sequential
-from tensorflow.keras.optimizers import Adam
-from tensorflow_addons.layers import InstanceNormalization
+from scipy.misc import imsave
+import os
+import shutil
+from PIL import Image
+import time
+import random
+import sys
 
-import tensorflow_datasets as tfds
+tf.disable_v2_behavior()
 
-# %matplotlib inline
+"""# **Defining Layers**"""
 
+def lrelu(x, leak=0.2, name="lrelu", alt_relu_impl=False):
+
+    with tf.variable_scope(name):
+        if alt_relu_impl:
+            f1 = 0.5 * (1 + leak)
+            f2 = 0.5 * (1 - leak)
+            # lrelu = 1/2 * (1 + leak) * x + 1/2 * (1 - leak) * |x|
+            return f1 * x + f2 * abs(x)
+        else:
+            return tf.maximum(x, leak*x)
+
+def instance_norm(x):
+
+    with tf.variable_scope("instance_norm"):
+        epsilon = 1e-5
+        mean, var = tf.nn.moments(x, [1, 2], keep_dims=True)
+        scale = tf.get_variable('scale',[x.get_shape()[-1]], 
+            initializer=tf.truncated_normal_initializer(mean=1.0, stddev=0.02))
+        offset = tf.get_variable('offset',[x.get_shape()[-1]],initializer=tf.constant_initializer(0.0))
+        out = scale*tf.div(x-mean, tf.sqrt(var+epsilon)) + offset
+
+        return out
+
+
+def general_conv2d(inputconv, o_d=64, f_h=7, f_w=7, s_h=1, s_w=1, stddev=0.02, padding="VALID", name="conv2d", do_norm=True, do_relu=True, relufactor=0):
+    with tf.variable_scope(name):
+        
+        conv = tf.compat.v1.layers.conv2d(inputconv, o_d, f_w, s_w, padding, kernel_initializer=tf.truncated_normal_initializer(stddev=stddev))
+        # conv = tf.compat.v1.layers.conv2d(inputconv, o_d, f_w, s_w, padding, activation_fn=tf.nn.relu, weights_initializer=tf.truncated_normal_initializer(stddev=stddev),biases_initializer=tf.constant_initializer(0.0))
+        if do_norm:
+            conv = instance_norm(conv)
+            # conv = tf.compat.v1.layers.batch_norm(conv, decay=0.9, updates_collections=None, epsilon=1e-5, scale=True, scope="batch_norm")
+            
+        if do_relu:
+            if(relufactor == 0):
+                conv = tf.nn.relu(conv,"relu")
+            else:
+                conv = lrelu(conv, relufactor, "lrelu")
+
+        return conv
+
+
+
+def general_deconv2d(inputconv, outshape, o_d=64, f_h=7, f_w=7, s_h=1, s_w=1, stddev=0.02, padding="VALID", name="deconv2d", do_norm=True, do_relu=True, relufactor=0):
+    with tf.variable_scope(name):
+
+        conv = tf.compat.v1.layers.conv2d_transpose(inputconv, o_d, [f_h, f_w], [s_h, s_w], padding, kernel_initializer=tf.truncated_normal_initializer(stddev=stddev))
+        # conv = tf.compat.v1.layers.conv2d_transpose(inputconv, o_d, [f_h, f_w], [s_h, s_w], padding, activation_fn=tf.nn.relu, weights_initializer=tf.truncated_normal_initializer(stddev=stddev),biases_initializer=tf.constant_initializer(0.0))
+        
+        if do_norm:
+            conv = instance_norm(conv)
+            # conv = tf.compat.v1.layers.batch_norm(conv, decay=0.9, updates_collections=None, epsilon=1e-5, scale=True, scope="batch_norm")
+            
+        if do_relu:
+            if(relufactor == 0):
+                conv = tf.nn.relu(conv,"relu")
+            else:
+                conv = lrelu(conv, relufactor, "lrelu")
+
+        return
+
+"""# **Defining Models**"""
+
+img_height = 256
+img_width = 256
+img_layer = 3
+img_size = img_height * img_width
+
+
+batch_size = 1
+pool_size = 50
+ngf = 32
+ndf = 64
+
+
+
+
+
+def build_resnet_block(inputres, dim, name="resnet"):
+    
+    with tf.variable_scope(name):
+
+        out_res = tf.pad(inputres, [[0, 0], [1, 1], [1, 1], [0, 0]], "REFLECT")
+        out_res = general_conv2d(out_res, dim, 3, 3, 1, 1, 0.02, "VALID","c1")
+        out_res = tf.pad(out_res, [[0, 0], [1, 1], [1, 1], [0, 0]], "REFLECT")
+        out_res = general_conv2d(out_res, dim, 3, 3, 1, 1, 0.02, "VALID","c2",do_relu=False)
+        
+        return tf.nn.relu(out_res + inputres)
+
+
+def build_generator_resnet_6blocks(inputgen, name="generator"):
+    with tf.variable_scope(name):
+        f = 7
+        ks = 3
+        
+        pad_input = tf.pad(inputgen,[[0, 0], [ks, ks], [ks, ks], [0, 0]], "REFLECT")
+        o_c1 = general_conv2d(pad_input, ngf, f, f, 1, 1, 0.02,name="c1")
+        o_c2 = general_conv2d(o_c1, ngf*2, ks, ks, 2, 2, 0.02,"SAME","c2")
+        o_c3 = general_conv2d(o_c2, ngf*4, ks, ks, 2, 2, 0.02,"SAME","c3")
+
+        o_r1 = build_resnet_block(o_c3, ngf*4, "r1")
+        o_r2 = build_resnet_block(o_r1, ngf*4, "r2")
+        o_r3 = build_resnet_block(o_r2, ngf*4, "r3")
+        o_r4 = build_resnet_block(o_r3, ngf*4, "r4")
+        o_r5 = build_resnet_block(o_r4, ngf*4, "r5")
+        o_r6 = build_resnet_block(o_r5, ngf*4, "r6")
+
+        o_c4 = general_deconv2d(o_r6, [batch_size,64,64,ngf*2], ngf*2, ks, ks, 2, 2, 0.02,"SAME","c4")
+        o_c5 = general_deconv2d(o_c4, [batch_size,128,128,ngf], ngf, ks, ks, 2, 2, 0.02,"SAME","c5")
+        o_c5_pad = tf.pad(o_c5,[[0, 0], [ks, ks], [ks, ks], [0, 0]], "REFLECT")
+        o_c6 = general_conv2d(o_c5_pad, img_layer, f, f, 1, 1, 0.02,"VALID","c6",do_relu=False)
+
+        # Adding the tanh layer
+
+        out_gen = tf.nn.tanh(o_c6,"t1")
+
+
+        return out_gen
+
+def build_generator_resnet_9blocks(inputgen, name="generator"):
+    with tf.variable_scope(name):
+        f = 7
+        ks = 3
+        
+        pad_input = tf.pad(inputgen,[[0, 0], [ks, ks], [ks, ks], [0, 0]], "REFLECT")
+        o_c1 = general_conv2d(pad_input, ngf, f, f, 1, 1, 0.02,name="c1")
+        o_c2 = general_conv2d(o_c1, ngf*2, ks, ks, 2, 2, 0.02,"SAME","c2")
+        o_c3 = general_conv2d(o_c2, ngf*4, ks, ks, 2, 2, 0.02,"SAME","c3")
+
+        o_r1 = build_resnet_block(o_c3, ngf*4, "r1")
+        o_r2 = build_resnet_block(o_r1, ngf*4, "r2")
+        o_r3 = build_resnet_block(o_r2, ngf*4, "r3")
+        o_r4 = build_resnet_block(o_r3, ngf*4, "r4")
+        o_r5 = build_resnet_block(o_r4, ngf*4, "r5")
+        o_r6 = build_resnet_block(o_r5, ngf*4, "r6")
+        o_r7 = build_resnet_block(o_r6, ngf*4, "r7")
+        o_r8 = build_resnet_block(o_r7, ngf*4, "r8")
+        o_r9 = build_resnet_block(o_r8, ngf*4, "r9")
+
+        o_c4 = general_deconv2d(o_r9, [batch_size,128,128,ngf*2], ngf*2, ks, ks, 2, 2, 0.02,"SAME","c4")
+        o_c5 = general_deconv2d(o_c4, [batch_size,256,256,ngf], ngf, ks, ks, 2, 2, 0.02,"SAME","c5")
+        o_c6 = general_conv2d(o_c5, img_layer, f, f, 1, 1, 0.02,"SAME","c6",do_relu=False)
+
+        # Adding the tanh layer
+
+        out_gen = tf.nn.tanh(o_c6,"t1")
+
+
+        return out_gen
+
+
+def build_gen_discriminator(inputdisc, name="discriminator"):
+
+    with tf.variable_scope(name):
+        f = 4
+
+        o_c1 = general_conv2d(inputdisc, ndf, f, f, 2, 2, 0.02, "SAME", "c1", do_norm=False, relufactor=0.2)
+        o_c2 = general_conv2d(o_c1, ndf*2, f, f, 2, 2, 0.02, "SAME", "c2", relufactor=0.2)
+        o_c3 = general_conv2d(o_c2, ndf*4, f, f, 2, 2, 0.02, "SAME", "c3", relufactor=0.2)
+        o_c4 = general_conv2d(o_c3, ndf*8, f, f, 1, 1, 0.02, "SAME", "c4",relufactor=0.2)
+        o_c5 = general_conv2d(o_c4, 1, f, f, 1, 1, 0.02, "SAME", "c5",do_norm=False,do_relu=False)
+
+        return o_c5
+
+
+def patch_discriminator(inputdisc, name="discriminator"):
+
+    with tf.variable_scope(name):
+        f= 4
+
+        patch_input = tf.random_crop(inputdisc,[1,70,70,3])
+        o_c1 = general_conv2d(patch_input, ndf, f, f, 2, 2, 0.02, "SAME", "c1", do_norm="False", relufactor=0.2)
+        o_c2 = general_conv2d(o_c1, ndf*2, f, f, 2, 2, 0.02, "SAME", "c2", relufactor=0.2)
+        o_c3 = general_conv2d(o_c2, ndf*4, f, f, 2, 2, 0.02, "SAME", "c3", relufactor=0.2)
+        o_c4 = general_conv2d(o_c3, ndf*8, f, f, 2, 2, 0.02, "SAME", "c4", relufactor=0.2)
+        o_c5 = general_conv2d(o_c4, 1, f, f, 1, 1, 0.02, "SAME", "c5",do_norm=False,do_relu=False)
+
+        return o_c5
+
+"""# **Main Code**"""
+
+img_height = 256
+img_width = 256
+img_layer = 3
+img_size = img_height * img_width
+
+to_train = True
+to_test = False
+to_restore = False
+output_path = "./output"
+check_dir = "./output/checkpoints/"
+
+
+temp_check = 0
+
+
+
+max_epoch = 1
+max_images = 100
+
+h1_size = 150
+h2_size = 300
+z_size = 100
+batch_size = 1
+pool_size = 50
+sample_size = 10
+save_training_images = True
+ngf = 32
+ndf = 64
+
+class CycleGAN():
+
+    def input_setup(self):
+
+        ''' 
+        This function basically setup variables for taking image input.
+        filenames_A/filenames_B -> takes the list of all training images
+        self.image_A/self.image_B -> Input image with each values ranging from [-1,1]
+        '''
+
+        filenames_A = tf.train.match_filenames_once("./input/horse2zebra/trainA/*.jpg")    
+        self.queue_length_A = tf.size(filenames_A)
+        filenames_B = tf.train.match_filenames_once("./input/horse2zebra/trainB/*.jpg")    
+        self.queue_length_B = tf.size(filenames_B)
+        
+        filename_queue_A = tf.train.string_input_producer(filenames_A)
+        filename_queue_B = tf.train.string_input_producer(filenames_B)
+
+        image_reader = tf.WholeFileReader()
+        _, image_file_A = image_reader.read(filename_queue_A)
+        _, image_file_B = image_reader.read(filename_queue_B)
+
+        self.image_A = tf.subtract(tf.div(tf.image.resize_images(tf.image.decode_jpeg(image_file_A),[256,256]),127.5),1)
+        self.image_B = tf.subtract(tf.div(tf.image.resize_images(tf.image.decode_jpeg(image_file_B),[256,256]),127.5),1)
+
+    
+
+    def input_read(self, sess):
+
+
+        '''
+        It reads the input into from the image folder.
+        self.fake_images_A/self.fake_images_B -> List of generated images used for calculation of loss function of Discriminator
+        self.A_input/self.B_input -> Stores all the training images in python list
+        '''
+
+        # Loading images into the tensors
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(coord=coord)
+
+        num_files_A = sess.run(self.queue_length_A)
+        num_files_B = sess.run(self.queue_length_B)
+
+        self.fake_images_A = np.zeros((pool_size,1,img_height, img_width, img_layer))
+        self.fake_images_B = np.zeros((pool_size,1,img_height, img_width, img_layer))
+
+
+        self.A_input = np.zeros((max_images, batch_size, img_height, img_width, img_layer))
+        self.B_input = np.zeros((max_images, batch_size, img_height, img_width, img_layer))
+
+        for i in range(max_images): 
+            image_tensor = sess.run(self.image_A)
+            if(image_tensor.size() == img_size*batch_size*img_layer):
+                self.A_input[i] = image_tensor.reshape((batch_size,img_height, img_width, img_layer))
+
+        for i in range(max_images):
+            image_tensor = sess.run(self.image_B)
+            if(image_tensor.size() == img_size*batch_size*img_layer):
+                self.B_input[i] = image_tensor.reshape((batch_size,img_height, img_width, img_layer))
+
+
+        coord.request_stop()
+        coord.join(threads)
+
+
+
+
+    def model_setup(self):
+
+        ''' This function sets up the model to train
+        self.input_A/self.input_B -> Set of training images.
+        self.fake_A/self.fake_B -> Generated images by corresponding generator of input_A and input_B
+        self.lr -> Learning rate variable
+        self.cyc_A/ self.cyc_B -> Images generated after feeding self.fake_A/self.fake_B to corresponding generator. This is use to calcualte cyclic loss
+        '''
+
+        self.input_A = tf.placeholder(tf.float32, [batch_size, img_width, img_height, img_layer], name="input_A")
+        self.input_B = tf.placeholder(tf.float32, [batch_size, img_width, img_height, img_layer], name="input_B")
+        
+        self.fake_pool_A = tf.placeholder(tf.float32, [None, img_width, img_height, img_layer], name="fake_pool_A")
+        self.fake_pool_B = tf.placeholder(tf.float32, [None, img_width, img_height, img_layer], name="fake_pool_B")
+
+        self.global_step = tf.Variable(0, name="global_step", trainable=False)
+
+        self.num_fake_inputs = 0
+
+        self.lr = tf.placeholder(tf.float32, shape=[], name="lr")
+
+        with tf.variable_scope("Model") as scope:
+            self.fake_B = build_generator_resnet_9blocks(self.input_A, name="g_A")
+            self.fake_A = build_generator_resnet_9blocks(self.input_B, name="g_B")
+            self.rec_A = build_gen_discriminator(self.input_A, "d_A")
+            self.rec_B = build_gen_discriminator(self.input_B, "d_B")
+
+            scope.reuse_variables()
+
+            self.fake_rec_A = build_gen_discriminator(self.fake_A, "d_A")
+            self.fake_rec_B = build_gen_discriminator(self.fake_B, "d_B")
+            self.cyc_A = build_generator_resnet_9blocks(self.fake_B, "g_B")
+            self.cyc_B = build_generator_resnet_9blocks(self.fake_A, "g_A")
+
+            scope.reuse_variables()
+
+            self.fake_pool_rec_A = build_gen_discriminator(self.fake_pool_A, "d_A")
+            self.fake_pool_rec_B = build_gen_discriminator(self.fake_pool_B, "d_B")
+
+    def loss_calc(self):
+
+        ''' In this function we are defining the variables for loss calcultions and traning model
+        d_loss_A/d_loss_B -> loss for discriminator A/B
+        g_loss_A/g_loss_B -> loss for generator A/B
+        *_trainer -> Variaous trainer for above loss functions
+        *_summ -> Summary variables for above loss functions'''
+
+        cyc_loss = tf.reduce_mean(tf.abs(self.input_A-self.cyc_A)) + tf.reduce_mean(tf.abs(self.input_B-self.cyc_B))
+        
+        disc_loss_A = tf.reduce_mean(tf.squared_difference(self.fake_rec_A,1))
+        disc_loss_B = tf.reduce_mean(tf.squared_difference(self.fake_rec_B,1))
+        
+        g_loss_A = cyc_loss*10 + disc_loss_B
+        g_loss_B = cyc_loss*10 + disc_loss_A
+
+        d_loss_A = (tf.reduce_mean(tf.square(self.fake_pool_rec_A)) + tf.reduce_mean(tf.squared_difference(self.rec_A,1)))/2.0
+        d_loss_B = (tf.reduce_mean(tf.square(self.fake_pool_rec_B)) + tf.reduce_mean(tf.squared_difference(self.rec_B,1)))/2.0
+
+        
+        optimizer = tf.train.AdamOptimizer(self.lr, beta1=0.5)
+
+        self.model_vars = tf.trainable_variables()
+
+        d_A_vars = [var for var in self.model_vars if 'd_A' in var.name]
+        g_A_vars = [var for var in self.model_vars if 'g_A' in var.name]
+        d_B_vars = [var for var in self.model_vars if 'd_B' in var.name]
+        g_B_vars = [var for var in self.model_vars if 'g_B' in var.name]
+        
+        self.d_A_trainer = optimizer.minimize(d_loss_A, var_list=d_A_vars)
+        self.d_B_trainer = optimizer.minimize(d_loss_B, var_list=d_B_vars)
+        self.g_A_trainer = optimizer.minimize(g_loss_A, var_list=g_A_vars)
+        self.g_B_trainer = optimizer.minimize(g_loss_B, var_list=g_B_vars)
+
+        for var in self.model_vars: print(var.name)
+
+        #Summary variables for tensorboard
+
+        self.g_A_loss_summ = tf.summary.scalar("g_A_loss", g_loss_A)
+        self.g_B_loss_summ = tf.summary.scalar("g_B_loss", g_loss_B)
+        self.d_A_loss_summ = tf.summary.scalar("d_A_loss", d_loss_A)
+        self.d_B_loss_summ = tf.summary.scalar("d_B_loss", d_loss_B)
+
+    def save_training_images(self, sess, epoch):
+
+        if not os.path.exists("./output/imgs"):
+            os.makedirs("./output/imgs")
+
+        for i in range(0,10):
+            fake_A_temp, fake_B_temp, cyc_A_temp, cyc_B_temp = sess.run([self.fake_A, self.fake_B, self.cyc_A, self.cyc_B],feed_dict={self.input_A:self.A_input[i], self.input_B:self.B_input[i]})
+            imsave("./output/imgs/fakeB_"+ str(epoch) + "_" + str(i)+".jpg",((fake_A_temp[0]+1)*127.5).astype(np.uint8))
+            imsave("./output/imgs/fakeA_"+ str(epoch) + "_" + str(i)+".jpg",((fake_B_temp[0]+1)*127.5).astype(np.uint8))
+            imsave("./output/imgs/cycA_"+ str(epoch) + "_" + str(i)+".jpg",((cyc_A_temp[0]+1)*127.5).astype(np.uint8))
+            imsave("./output/imgs/cycB_"+ str(epoch) + "_" + str(i)+".jpg",((cyc_B_temp[0]+1)*127.5).astype(np.uint8))
+            imsave("./output/imgs/inputA_"+ str(epoch) + "_" + str(i)+".jpg",((self.A_input[i][0]+1)*127.5).astype(np.uint8))
+            imsave("./output/imgs/inputB_"+ str(epoch) + "_" + str(i)+".jpg",((self.B_input[i][0]+1)*127.5).astype(np.uint8))
+
+    def fake_image_pool(self, num_fakes, fake, fake_pool):
+        ''' This function saves the generated image to corresponding pool of images.
+        In starting. It keeps on feeling the pool till it is full and then randomly selects an
+        already stored image and replace it with new one.'''
+
+        if(num_fakes < pool_size):
+            fake_pool[num_fakes] = fake
+            return fake
+        else :
+            p = random.random()
+            if p > 0.5:
+                random_id = random.randint(0,pool_size-1)
+                temp = fake_pool[random_id]
+                fake_pool[random_id] = fake
+                return temp
+            else :
+                return fake
+
+
+    def train(self):
+
+
+        ''' Training Function '''
+
+
+        # Load Dataset from the dataset folder
+        self.input_setup()  
+
+        #Build the network
+        self.model_setup()
+
+        #Loss function calculations
+        self.loss_calc()
+      
+        # Initializing the global variables
+        init = tf.global_variables_initializer()
+        saver = tf.train.Saver()     
+
+        with tf.Session() as sess:
+            sess.run(init)
+
+            #Read input to nd array
+            self.input_read(sess)
+
+            #Restore the model to run the model from last checkpoint
+            if to_restore:
+                chkpt_fname = tf.train.latest_checkpoint(check_dir)
+                saver.restore(sess, chkpt_fname)
+
+            writer = tf.summary.FileWriter("./output/2")
+
+            if not os.path.exists(check_dir):
+                os.makedirs(check_dir)
+
+            # Training Loop
+            for epoch in range(sess.run(self.global_step),100):                
+                print ("In the epoch ", epoch)
+                saver.save(sess,os.path.join(check_dir,"cyclegan"),global_step=epoch)
+
+                # Dealing with the learning rate as per the epoch number
+                if(epoch < 100) :
+                    curr_lr = 0.0002
+                else:
+                    curr_lr = 0.0002 - 0.0002*(epoch-100)/100
+
+                if(save_training_images):
+                    self.save_training_images(sess, epoch)
+
+                # sys.exit()
+
+                for ptr in range(0,max_images):
+                    print("In the iteration ",ptr)
+                    print("Starting",time.time()*1000.0)
+
+                    # Optimizing the G_A network
+
+                    _, fake_B_temp, summary_str = sess.run([self.g_A_trainer, self.fake_B, self.g_A_loss_summ],feed_dict={self.input_A:self.A_input[ptr], self.input_B:self.B_input[ptr], self.lr:curr_lr})
+                    
+                    writer.add_summary(summary_str, epoch*max_images + ptr)                    
+                    fake_B_temp1 = self.fake_image_pool(self.num_fake_inputs, fake_B_temp, self.fake_images_B)
+                    
+                    # Optimizing the D_B network
+                    _, summary_str = sess.run([self.d_B_trainer, self.d_B_loss_summ],feed_dict={self.input_A:self.A_input[ptr], self.input_B:self.B_input[ptr], self.lr:curr_lr, self.fake_pool_B:fake_B_temp1})
+                    writer.add_summary(summary_str, epoch*max_images + ptr)
+                    
+                    
+                    # Optimizing the G_B network
+                    _, fake_A_temp, summary_str = sess.run([self.g_B_trainer, self.fake_A, self.g_B_loss_summ],feed_dict={self.input_A:self.A_input[ptr], self.input_B:self.B_input[ptr], self.lr:curr_lr})
+
+                    writer.add_summary(summary_str, epoch*max_images + ptr)
+                    
+                    
+                    fake_A_temp1 = self.fake_image_pool(self.num_fake_inputs, fake_A_temp, self.fake_images_A)
+
+                    # Optimizing the D_A network
+                    _, summary_str = sess.run([self.d_A_trainer, self.d_A_loss_summ],feed_dict={self.input_A:self.A_input[ptr], self.input_B:self.B_input[ptr], self.lr:curr_lr, self.fake_pool_A:fake_A_temp1})
+
+                    writer.add_summary(summary_str, epoch*max_images + ptr)
+                    
+                    self.num_fake_inputs+=1
+            
+                        
+
+                sess.run(tf.assign(self.global_step, epoch + 1))
+
+            writer.add_graph(sess.graph)
+
+    def test(self):
+
+
+        ''' Testing Function'''
+
+        print("Testing the results")
+
+        self.input_setup()
+
+        self.model_setup()
+        saver = tf.train.Saver()
+        init = tf.global_variables_initializer()
+
+        with tf.Session() as sess:
+
+            sess.run(init)
+
+            self.input_read(sess)
+
+            chkpt_fname = tf.train.latest_checkpoint(check_dir)
+            saver.restore(sess, chkpt_fname)
+
+            if not os.path.exists("./output/imgs/test/"):
+                os.makedirs("./output/imgs/test/")            
+
+            for i in range(0,100):
+                fake_A_temp, fake_B_temp = sess.run([self.fake_A, self.fake_B],feed_dict={self.input_A:self.A_input[i], self.input_B:self.B_input[i]})
+                imsave("./output/imgs/test/fakeB_"+str(i)+".jpg",((fake_A_temp[0]+1)*127.5).astype(np.uint8))
+                imsave("./output/imgs/test/fakeA_"+str(i)+".jpg",((fake_B_temp[0]+1)*127.5).astype(np.uint8))
+                imsave("./output/imgs/test/inputA_"+str(i)+".jpg",((self.A_input[i][0]+1)*127.5).astype(np.uint8))
+                imsave("./output/imgs/test/inputB_"+str(i)+".jpg",((self.B_input[i][0]+1)*127.5).astype(np.uint8))
+
+
+def main():
+    
+    model = CycleGAN()
+    if to_train:
+        model.train()
+    elif to_test:
+        model.test()
+
+if __name__ == '__main__':
+
+    main()
+
+"""# **Analysis**
+
+Transferring characteristics from one image to another is an exciting proposition. How cool would it be if we could take a photo and convert it into the style of Van Gogh or Picasso!
+
+<center width="100%"><img src="https://drive.google.com/uc?id=1M38cToPbicUJ1Q3Yg9gbN0VYuhti7Zt4" width="500px"/></center>
+
+Or maybe we want to put a smile on Agent 42's face with the virally popular Faceapp.
+
+<center width="100%"><img src="https://drive.google.com/uc?id=1H-iM78_FbUxqy_4YqNeWeYerj0T5SVaQ" width="500px"/></center>
+
+These are examples of cross domain image transfer, we want to take an image from an input domain $D_i$ Di and then transform it into an image of target domain $D_t$ without necessarily having a one-to-one mapping between images from input to target domain in the training set. Relaxation of having one-to-one mapping makes this formulation quite powerful the same method could be used to tackle a variety of problems by varying the input-output domain pairs performing artistic style transfer, adding bokeh effect to phone camera photos, creating outline maps from satellite images or convert horses to zebras and vice versa!! This is achieved by a type of generative model, specifically a Generative Adversarial Network dubbed CycleGAN. Here are some examples of what CycleGAN can do.
+
+<center width="100%"><img src="https://drive.google.com/uc?id=1TPHv_NEGYYOvVlI3V7PlgmZkJtWJIFk1" width="500px"/></center>
+
+We are not going to go look at GANs from scratch, check out this simplified tutorial to get a hang of it. This workshop video at NIPS 2016 by Ian Goodfellow (the guy behind the GANs) is also a great resource. What we will be doing in this post is look at how to implement a CycleGAN in Tensorflow.
+
+## **1. Unpaired Image-to-Image Translation**
+
+<center width="100%"><img src="https://drive.google.com/uc?id=1juJUU5JjXSNaaKKIwJt3tzS4u0Z_HOa2" width="500px"/></center>
+
+As mentioned earlier, the CycleGAN works without paired examples of transformation from source to target domain. Recent methods such as Pix2Pix depend on the availaibilty of training examples where the same data is available in both domains. The power of CycleGAN lies in being able to learn such transformations without one-to-one mapping between training data in source and target domains. The need for a paired image in the target domain is eliminated by making a two-step transformation of source domain image - first by trying to map it to target domain and then back to the original image. Mapping the image to target domain is done using a generator network and the quality of this generated image is improved by pitching the generator against a discrimintor (as described below).
+
+### **1.1 Adversarial Networks**
+
+We have a generator network and discriminator network playing against each other. The generator tries to produce samples from the desired distribution and the discriminator tries to predict if the sample is from the actual distribution or produced by the generator. The generator and discriminator are trained jointly. The effect this has is that eventually the generator learns to approximate the underlying distribution completely and the discriminator is left guessing randomly.
+
+### **1.2 Cycle-Consistent**
+
+The above adversarial method of training has a problem though. Quoting the authors of the original paper:
+
+"Adversarial training can, in theory, learn mappings $G$ and $F$ that produce outputs identically distributed as target domains $Y$ and $X$ respectively. However, with large enough capacity, a network can map the same set of input images to any random permutation of images in the target domain, where any of the learned mappings can induce an output distribution that matches the target distribution. Thus, an adversarial loss alone cannot guarantee that the learned function can map an individual input $x_i$ to a desired output $y_i$."
+
+To regularize the model, the authors introduce the constraint of cycle-consistency if we transform from source distribution to target and then back again to source distribution, we should get samples from our source distribution.
+
+## **2. Network Architecture**
+
+<center width="100%"><img src="https://drive.google.com/uc?id=1ybmuApppLEgsADnNk0SYnu63XB7iN7oS" width="500px"/></center>
+
+<hr>
+
+<center width="100%"><img src="https://drive.google.com/uc?id=13PPQBt43koR4juMB53XYgSe4Bx5mKSGE" width="500px"/></center>
+
+In a paired dataset, every image, say $img_A$, is manually mapped to some image, say $img_B$, in target domain, such that they share various features. Features that can be used to map an image $(img_A/img_B)$ to its correspondingly mapped counterpart $(img_B/img_A)$. Basically, pairing is done to make input and output share some common features. This mapping defines meaningful transformation of an image from one damain to another domain. So, when we have paired dataset, generator must take an input, say $input_A$, from domain $D_A$ and map this image to an output image, say $gen_B$, which must be close to its mapped counterpart. But we don't have this luxury in unpaired dataset, there is no pre-defined meaningful transformation that we can learn, so, we will create it. We need to make sure that there is some meaningful relation between input image and generated image. So, authors tried to enforce this by saying that Generator will map input image $(input_A)$ from domain $D_A$ to some image in target domain $D_B$, but to make sure that there is meaningful relation between these images, they must share some feature, features that can be used to map this output image back to input image, so there must be another generator that must be able to map back this output image back to original input. So, you can see this condition defining a meaningful mapping between $input_A$ and $gen_B$.
+
+In a nutshell, the model works by taking an input image from domain $D_A$ which is fed to our first generator $Generator_A\to_B$ whose job is to transform a given image from domain $D_A$ to an image in target domain $D_B$. This new generated image is then fed to another generator $Generator_B\to_A$ which converts it back into an image, $Cyclic_A$, from our original domain $D_A$ (think of autoencoders, except that our latent space is $D_t$). And as we discussed in above paragraph, this output image must be close to original input image to define a meaningful mapping that is absent in unpaired dataset.
+
+As we can see in above figure, two inputs are fed into each discriminator(one is original image corresponding to that domain and other is the generated image via a generator) and the job of discriminator is to distinguish between them, so that discriminator is able to defy the adversary (in this case generator) and reject images generated by it. While the generator would like to make sure that these images get accepted by the discriminator, so it will try to generate images which are very close to original images in Class $D_B$. (In fact, the generator and discriminator are actually playing a game whose Nash equilibrium is achieved when the generator's distribution becomes same as the desired distribution)
+
+## **2. Building Generator**
+
+High level structure of Generator can be viewed in the following image.
+
+<center width="100%"><img src="https://drive.google.com/uc?id=1ybmuApppLEgsADnNk0SYnu63XB7iN7oS" width="500px"/></center>
+
+The generator have three components:
+1. Encoder
+2. Transformer
+3. Decoder 
+
+Following are the parameters we have used for the mode.
+"""
+
+ngf = 32 # Number of filters in first layer of generator
+ndf = 64 # Number of filters in first layer of discriminator
+batch_size = 1 # batch_size
+pool_size = 50 # pool_size
+img_width = 256 # Imput image will of width 256
+img_height = 256 # Input image will be of height 256
+img_depth = 3 # RGB format
+
+"""First three parameters are self explanatory and we will explain what `pool_size` means in the **Generated Image Pool** section.
+
+## **3. Encoding**
+
+For the purpose of simplicity, throughout the article we will assume that the input size is $[256,256,3]$. The first step is extracting the features from an image which is done a convolution network. As input a convolution network takes an image, size of filter window that we move over input image to extract out features and the stride size to decide how much we will move filter window after each step. So the first layer of encoding looks like this:
+"""
+
+o_c1 = general_conv2d(input_gen, num_features=ngf, window_width=7, window_height=7, stride_width=1, stride_height=1)
+
+"""## **4. Transformation**
+
+## **5. Decoding**
+
+## **6. Building Discriminator**
+
+## **7. Building Model**
+
+## **8. Loss Function**
+
+### **8.1 Discriminator Loss**
+
+### **8.2 Generator Loss**
+
+### **8.3 Cyclic Loss**
+
+### **8.4 All Losses**
+
+## **9. Training Model**
+
+### **9.1 Generated Image Pool**
+
+## **10. Result**
+"""
