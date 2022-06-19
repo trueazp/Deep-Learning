@@ -102,15 +102,10 @@ img_width = 256
 img_layer = 3
 img_size = img_height * img_width
 
-
 batch_size = 1
 pool_size = 50
 ngf = 32
 ndf = 64
-
-
-
-
 
 def build_resnet_block(inputres, dim, name="resnet"):
     
@@ -226,10 +221,7 @@ to_restore = False
 output_path = "./output"
 check_dir = "./output/checkpoints/"
 
-
 temp_check = 0
-
-
 
 max_epoch = 1
 max_images = 100
@@ -558,107 +550,3 @@ def main():
 if __name__ == '__main__':
 
     main()
-
-"""# **Analysis**
-
-Transferring characteristics from one image to another is an exciting proposition. How cool would it be if we could take a photo and convert it into the style of Van Gogh or Picasso!
-
-<center width="100%"><img src="https://drive.google.com/uc?id=1M38cToPbicUJ1Q3Yg9gbN0VYuhti7Zt4" width="500px"/></center>
-
-Or maybe we want to put a smile on Agent 42's face with the virally popular Faceapp.
-
-<center width="100%"><img src="https://drive.google.com/uc?id=1H-iM78_FbUxqy_4YqNeWeYerj0T5SVaQ" width="500px"/></center>
-
-These are examples of cross domain image transfer, we want to take an image from an input domain $D_i$ Di and then transform it into an image of target domain $D_t$ without necessarily having a one-to-one mapping between images from input to target domain in the training set. Relaxation of having one-to-one mapping makes this formulation quite powerful the same method could be used to tackle a variety of problems by varying the input-output domain pairs performing artistic style transfer, adding bokeh effect to phone camera photos, creating outline maps from satellite images or convert horses to zebras and vice versa!! This is achieved by a type of generative model, specifically a Generative Adversarial Network dubbed CycleGAN. Here are some examples of what CycleGAN can do.
-
-<center width="100%"><img src="https://drive.google.com/uc?id=1TPHv_NEGYYOvVlI3V7PlgmZkJtWJIFk1" width="500px"/></center>
-
-We are not going to go look at GANs from scratch, check out this simplified tutorial to get a hang of it. This workshop video at NIPS 2016 by Ian Goodfellow (the guy behind the GANs) is also a great resource. What we will be doing in this post is look at how to implement a CycleGAN in Tensorflow.
-
-## **1. Unpaired Image-to-Image Translation**
-
-<center width="100%"><img src="https://drive.google.com/uc?id=1juJUU5JjXSNaaKKIwJt3tzS4u0Z_HOa2" width="500px"/></center>
-
-As mentioned earlier, the CycleGAN works without paired examples of transformation from source to target domain. Recent methods such as Pix2Pix depend on the availaibilty of training examples where the same data is available in both domains. The power of CycleGAN lies in being able to learn such transformations without one-to-one mapping between training data in source and target domains. The need for a paired image in the target domain is eliminated by making a two-step transformation of source domain image - first by trying to map it to target domain and then back to the original image. Mapping the image to target domain is done using a generator network and the quality of this generated image is improved by pitching the generator against a discrimintor (as described below).
-
-### **1.1 Adversarial Networks**
-
-We have a generator network and discriminator network playing against each other. The generator tries to produce samples from the desired distribution and the discriminator tries to predict if the sample is from the actual distribution or produced by the generator. The generator and discriminator are trained jointly. The effect this has is that eventually the generator learns to approximate the underlying distribution completely and the discriminator is left guessing randomly.
-
-### **1.2 Cycle-Consistent**
-
-The above adversarial method of training has a problem though. Quoting the authors of the original paper:
-
-"Adversarial training can, in theory, learn mappings $G$ and $F$ that produce outputs identically distributed as target domains $Y$ and $X$ respectively. However, with large enough capacity, a network can map the same set of input images to any random permutation of images in the target domain, where any of the learned mappings can induce an output distribution that matches the target distribution. Thus, an adversarial loss alone cannot guarantee that the learned function can map an individual input $x_i$ to a desired output $y_i$."
-
-To regularize the model, the authors introduce the constraint of cycle-consistency if we transform from source distribution to target and then back again to source distribution, we should get samples from our source distribution.
-
-## **2. Network Architecture**
-
-<center width="100%"><img src="https://drive.google.com/uc?id=1ybmuApppLEgsADnNk0SYnu63XB7iN7oS" width="500px"/></center>
-
-<hr>
-
-<center width="100%"><img src="https://drive.google.com/uc?id=13PPQBt43koR4juMB53XYgSe4Bx5mKSGE" width="500px"/></center>
-
-In a paired dataset, every image, say $img_A$, is manually mapped to some image, say $img_B$, in target domain, such that they share various features. Features that can be used to map an image $(img_A/img_B)$ to its correspondingly mapped counterpart $(img_B/img_A)$. Basically, pairing is done to make input and output share some common features. This mapping defines meaningful transformation of an image from one damain to another domain. So, when we have paired dataset, generator must take an input, say $input_A$, from domain $D_A$ and map this image to an output image, say $gen_B$, which must be close to its mapped counterpart. But we don't have this luxury in unpaired dataset, there is no pre-defined meaningful transformation that we can learn, so, we will create it. We need to make sure that there is some meaningful relation between input image and generated image. So, authors tried to enforce this by saying that Generator will map input image $(input_A)$ from domain $D_A$ to some image in target domain $D_B$, but to make sure that there is meaningful relation between these images, they must share some feature, features that can be used to map this output image back to input image, so there must be another generator that must be able to map back this output image back to original input. So, you can see this condition defining a meaningful mapping between $input_A$ and $gen_B$.
-
-In a nutshell, the model works by taking an input image from domain $D_A$ which is fed to our first generator $Generator_A\to_B$ whose job is to transform a given image from domain $D_A$ to an image in target domain $D_B$. This new generated image is then fed to another generator $Generator_B\to_A$ which converts it back into an image, $Cyclic_A$, from our original domain $D_A$ (think of autoencoders, except that our latent space is $D_t$). And as we discussed in above paragraph, this output image must be close to original input image to define a meaningful mapping that is absent in unpaired dataset.
-
-As we can see in above figure, two inputs are fed into each discriminator(one is original image corresponding to that domain and other is the generated image via a generator) and the job of discriminator is to distinguish between them, so that discriminator is able to defy the adversary (in this case generator) and reject images generated by it. While the generator would like to make sure that these images get accepted by the discriminator, so it will try to generate images which are very close to original images in Class $D_B$. (In fact, the generator and discriminator are actually playing a game whose Nash equilibrium is achieved when the generator's distribution becomes same as the desired distribution)
-
-## **2. Building Generator**
-
-High level structure of Generator can be viewed in the following image.
-
-<center width="100%"><img src="https://drive.google.com/uc?id=1ybmuApppLEgsADnNk0SYnu63XB7iN7oS" width="500px"/></center>
-
-The generator have three components:
-1. Encoder
-2. Transformer
-3. Decoder 
-
-Following are the parameters we have used for the mode.
-"""
-
-ngf = 32 # Number of filters in first layer of generator
-ndf = 64 # Number of filters in first layer of discriminator
-batch_size = 1 # batch_size
-pool_size = 50 # pool_size
-img_width = 256 # Imput image will of width 256
-img_height = 256 # Input image will be of height 256
-img_depth = 3 # RGB format
-
-"""First three parameters are self explanatory and we will explain what `pool_size` means in the **Generated Image Pool** section.
-
-## **3. Encoding**
-
-For the purpose of simplicity, throughout the article we will assume that the input size is $[256,256,3]$. The first step is extracting the features from an image which is done a convolution network. As input a convolution network takes an image, size of filter window that we move over input image to extract out features and the stride size to decide how much we will move filter window after each step. So the first layer of encoding looks like this:
-"""
-
-o_c1 = general_conv2d(input_gen, num_features=ngf, window_width=7, window_height=7, stride_width=1, stride_height=1)
-
-"""## **4. Transformation**
-
-## **5. Decoding**
-
-## **6. Building Discriminator**
-
-## **7. Building Model**
-
-## **8. Loss Function**
-
-### **8.1 Discriminator Loss**
-
-### **8.2 Generator Loss**
-
-### **8.3 Cyclic Loss**
-
-### **8.4 All Losses**
-
-## **9. Training Model**
-
-### **9.1 Generated Image Pool**
-
-## **10. Result**
-"""
