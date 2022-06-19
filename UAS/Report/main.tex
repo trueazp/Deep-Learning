@@ -111,13 +111,13 @@ CycleGAN contains two mapping functions $G:X \to Y$ and $F:Y \to X$. Two adveras
 
 \begin{equation}
     \begin{split}
-         V(G, F, D_X, D_Y) & = V_GAN(D_Y, G, X, Y) \\
-         & + V_GAN(D_X, F, Y, X) \\
-         & + \lambda V_cyc(G, F)
+         V(G, F, D_X, D_Y) & = V_{GAN}(D_Y, G, X, Y) \\
+         & + V_{GAN}(D_X, F, Y, X) \\
+         & + \lambda V_{cyc}(G, F)
     \end{split}
 \end{equation}
 
-Where $V_GAN(D_Y, G, X, Y)$ and $V_GAN(D_X, F, Y, X)$ are the loss function for mapping functions $G$ and $F$, and for the discriminators $D_Y$ and $D_X$ is the cycle consistency loss that forces $F(G(x)) \approx x$ and $G(F(y)) \approx y$, in which each image can be reconstructed after a cycle mapping.$\lambda$ penalizes the importance between $V_GAN$ and $V_cyc$.
+Where $V_{GAN}(D_Y, G, X, Y)$ and $V_{GAN}(D_X, F, Y, X)$ are the loss function for mapping functions $G$ and $F$, and for the discriminators $D_Y$ and $D_X$ is the cycle consistency loss that forces $F(G(x)) \approx x$ and $G(F(y)) \approx y$, in which each image can be reconstructed after a cycle mapping.$\lambda$ penalizes the importance between $V_{GAN}$ and $V_{cyc}$.
 
 Transferring characteristics from one image to another is an exciting proposition. How cool would it be if we could take a photo and convert it into the style of Van Gogh or Picasso!
 
